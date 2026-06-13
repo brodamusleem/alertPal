@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import { pathToFileURL } from "node:url";
+
+import verifyTransactionRouter from "./verify-transaction.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -8,6 +11,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb" }));
+app.use(verifyTransactionRouter);
 
 // Health check
 app.get("/health", (req, res) => {
@@ -15,11 +19,35 @@ app.get("/health", (req, res) => {
 });
 
 // Mock receipt database for testing
-const MOCK_RECEIPTS = {
-  "op2026061108731": { ref: "OP2026061108731", amount: 15000, sender: "Emeka Johnson", recipient: "Mama Titi Store", bank: "OPay", date: "2026-06-11", status: "completed" },
-  "op2026061094421": { ref: "OP2026061094421", amount: 45000, sender: "Adebayo Okafor", recipient: "Kunle Electronics", bank: "OPay", date: "2026-06-11", status: "completed" },
-  "gt2026061055893": { ref: "GT2026061055893", amount: 32500, sender: "Ngozi Obi", recipient: "Mama Titi Store", bank: "GTBank", date: "2026-06-11", status: "completed" },
+export const MOCK_RECEIPTS = {
+  "OP2026061108731": { ref: "OP2026061108731", amount: 15000, sender: "Emeka Johnson", recipient: "Mama Titi Store", bank: "OPay", date: "2026-06-11", status: "completed" },
+  "OP2026061094421": { ref: "OP2026061094421", amount: 45000, sender: "Adebayo Okafor", recipient: "Kunle Electronics", bank: "OPay", date: "2026-06-11", status: "completed" },
+  "GT2026061055893": { ref: "GT2026061055893", amount: 32500, sender: "Ngozi Obi", recipient: "Mama Titi Store", bank: "GTBank", date: "2026-06-11", status: "completed" },
 };
+
+export function scoreReceiptConfidence(extracted = {}) {
+  const rawRef = String(extracted.ref || "").trim().toUpperCase();
+  const knownRef = Boolean(MOCK_RECEIPTS[rawRef]);
+  const isFlashFund = /FLASH/i.test(rawRef);
+  const hasSignals = Array.isArray(extracted.fake_signals) && extracted.fake_signals.length > 0;
+  const looksSuspicious = Boolean(extracted.is_likely_fake || isFlashFund || hasSignals || (!knownRef && rawRef.length > 0));
+
+  const confidence = knownRef && !looksSuspicious
+    ? "high"
+    : "low";
+
+  const fakeSignals = [
+    ...(Array.isArray(extracted.fake_signals) ? extracted.fake_signals : []),
+    ...(!knownRef && rawRef ? ["Reference is not present in the current OPay/GTBank mock database."] : []),
+    ...(isFlashFund ? ["FLASH-style reference patterns are commonly used in fake alert attacks."] : []),
+  ];
+
+  return {
+    confidence,
+    is_likely_fake: looksSuspicious || !knownRef,
+    fake_signals: [...new Set(fakeSignals)],
+  };
+}
 
 // Simple pattern-based text detection from image
 async function detectTextPatterns(base64Image) {
@@ -57,9 +85,14 @@ async function detectTextPatterns(base64Image) {
       bank: mockData.bank,
       date: mockData.date,
       status: mockData.status,
-      confidence: "high",
-      is_likely_fake: false,
-      fake_signals: [],
+      ...scoreReceiptConfidence({
+        ref: mockData.ref,
+        amount: mockData.amount,
+        sender: mockData.sender,
+        recipient: mockData.recipient,
+        bank: mockData.bank,
+        status: mockData.status,
+      }),
     };
   }
 
@@ -72,9 +105,11 @@ async function detectTextPatterns(base64Image) {
     bank: null,
     date: null,
     status: null,
-    confidence: "low",
-    is_likely_fake: false,
-    fake_signals: ["Could not detect clear receipt text in image"],
+    ...scoreReceiptConfidence({
+      ref: null,
+      is_likely_fake: true,
+      fake_signals: ["Could not detect clear receipt text in image"],
+    }),
   };
 }
 
@@ -100,8 +135,14 @@ app.post("/api/extract-receipt", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 AlertCheck API proxy running on http://localhost:${PORT}`);
-  console.log(`📡 Receipt extraction endpoint: POST http://localhost:${PORT}/api/extract-receipt`);
-  console.log(`✨ Using Pattern-Based Detection (No external dependencies!)`);
-});
+export { app };
+
+const isDirectExecution = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectExecution) {
+  app.listen(PORT, () => {
+    console.log(`🚀 AlertCheck API proxy running on http://localhost:${PORT}`);
+    console.log(`📡 Receipt extraction endpoint: POST http://localhost:${PORT}/api/extract-receipt`);
+    console.log(`✨ Using Pattern-Based Detection (No external dependencies!)`);
+  });
+}

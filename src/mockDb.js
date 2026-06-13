@@ -54,15 +54,37 @@ export const MOCK_TRANSACTIONS = {
   },
 };
 
-export function verifyTransaction(ref) {
-  const trimmed = ref.trim().toUpperCase();
-  const found = MOCK_TRANSACTIONS[trimmed] || MOCK_TRANSACTIONS[ref.trim()];
-  if (found) {
-    return { found: true, transaction: found, fraud_risk: "none" };
+export function verifyTransaction(ref, amount = null, status = null) {
+  const trimmed = String(ref || "").trim().toUpperCase();
+  const found = MOCK_TRANSACTIONS[trimmed] || MOCK_TRANSACTIONS[String(ref || "").trim()];
+
+  if (!found) {
+    return {
+      found: false,
+      fraud_risk: "high",
+      message: "No transaction found with this reference number in OPay's database.",
+      checks: [
+        { label: "Reference exists", ok: false },
+        { label: "Amount matches OCR", ok: false },
+        { label: "Status looks completed", ok: false },
+      ],
+    };
   }
+
+  const amountMatches = amount === null || Number(amount) === Number(found.amount);
+  const statusLooksCompleted = status === null || /completed|successful|approved|settled/i.test(String(status));
+
   return {
-    found: false,
-    fraud_risk: "high",
-    message: "No transaction found with this reference number in OPay's database.",
+    found: true,
+    transaction: found,
+    fraud_risk: amountMatches && statusLooksCompleted ? "none" : "medium",
+    checks: [
+      { label: "Reference exists", ok: true },
+      { label: "Amount matches OCR", ok: amountMatches },
+      { label: "Status looks completed", ok: statusLooksCompleted },
+    ],
+    message: amountMatches
+      ? "Transaction matched the reference and amount in the mock database."
+      : "Transaction reference matched, but the displayed amount does not match the stored record.",
   };
 }

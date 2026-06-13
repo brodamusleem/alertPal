@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { verifyTransaction } from "./mockDb.js";
 import { extractReceiptData } from "./claudeApi.js";
+import { verifyTransactionViaApi } from "./transactionApi.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n) => "₦" + Number(n).toLocaleString("en-NG");
@@ -181,10 +182,10 @@ function VerifyScreen({ onResult, onBack }) {
   const handleVerify = async () => {
     if (!ref.trim()) return;
     setLoading(true);
-    await new Promise(r => setTimeout(r, 900)); // simulate API call
-    const result = verifyTransaction(ref.trim());
+    const normalized = ref.trim().toUpperCase();
+    const result = await verifyTransactionViaApi(normalized);
     setLoading(false);
-    onResult(ref.trim(), result);
+    onResult(normalized, result);
   };
 
   return (
@@ -269,8 +270,7 @@ function ScanScreen({ onResult, onBack }) {
   const handleConfirm = async () => {
     if (!extracted?.ref) return;
     setStage("verifying");
-    await new Promise(r => setTimeout(r, 800));
-    const result = verifyTransaction(extracted.ref);
+    const result = await verifyTransactionViaApi(extracted.ref, extracted.amount, extracted.status);
     onResult(extracted.ref, result, extracted);
   };
 
@@ -432,6 +432,23 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
   const real = result?.found;
   const txn = result?.transaction;
 
+  const amountMatch = Boolean(
+    real &&
+    aiData?.amount &&
+    txn?.amount &&
+    Number(aiData.amount) === Number(txn.amount)
+  );
+  const refExtracted = Boolean(aiData?.ref);
+  const statusLooksCompleted = /completed|successful|approved|settled/i.test(String(aiData?.status || ""));
+  const fieldsPresent = Boolean(aiData?.ref && aiData?.amount && aiData?.sender);
+
+  const decisionChecks = [
+    { label: "Reference matched in DB", ok: real },
+    { label: "Amount matches OCR readout", ok: amountMatch },
+    { label: "Receipt status looks completed", ok: statusLooksCompleted },
+    { label: "OCR extracted key fields", ok: fieldsPresent },
+  ];
+
   const copyRef = () => {
     navigator.clipboard.writeText(ref).catch(() => {});
     setCopied(true);
@@ -517,13 +534,36 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
           </div>
         )}
 
-        {/* AI note if scan was used */}
+        {/* OCR + verification evidence */}
+        {aiData && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-3 border-b border-gray-50">
+              OCR evidence used in verdict
+            </p>
+            <div className="px-4 py-3 space-y-3">
+              {decisionChecks.map((item) => (
+                <div key={item.label} className="flex items-start gap-2 text-xs">
+                  <span className={`mt-0.5 ${item.ok ? "text-green-600" : "text-red-500"}`}>
+                    {item.ok ? "✓" : "•"}
+                  </span>
+                  <span className={`flex-1 ${item.ok ? "text-gray-700" : "text-gray-500"}`}>
+                    {item.label}
+                  </span>
+                </div>
+              ))}
+              <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-xl p-3 leading-relaxed">
+                OCR provides the receipt fields; the final verdict is based on the reference/amount match and the consistency of those extracted details.
+              </p>
+            </div>
+          </div>
+        )}
+
         {aiData && (
           <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 flex gap-2">
             <Zap size={12} className="text-purple-500 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-purple-700">
-              Claude AI read your receipt image · Confidence: <span className="font-semibold">{aiData.confidence}</span>
-              {aiData.is_likely_fake && " · AI also suspects this receipt may be fabricated"}
+              OCR extraction confidence: <span className="font-semibold">{aiData.confidence}</span>
+              {aiData.is_likely_fake ? " · OCR also flagged suspicious receipt signals" : " · OCR fields were readable and used in the verification logic"}
             </p>
           </div>
         )}
