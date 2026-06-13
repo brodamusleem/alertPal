@@ -9,6 +9,7 @@
     "dev:api": "node api/proxy.js",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test api/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

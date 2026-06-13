@@ -1,11 +1,10 @@
 import { useState, useRef, useCallback } from "react";
 import {
-  ShieldCheck, ShieldAlert, ShieldX, Upload, Search,
-  CheckCircle2, XCircle, AlertTriangle, Clock, ChevronRight,
+  ShieldCheck, ShieldX, Upload, Search,
+  CheckCircle2, XCircle, AlertTriangle, ChevronRight,
   Zap, RefreshCw, Copy, Flag, History, Smartphone, Camera,
   ArrowLeft, Info, Wifi
 } from "lucide-react";
-import { verifyTransaction } from "./mockDb.js";
 import { extractReceiptData } from "./claudeApi.js";
 import { verifyTransactionViaApi } from "./transactionApi.js";
 
@@ -30,6 +29,12 @@ const DEMO_REFS = [
   { ref: "GT2026061055893", label: "Real — ₦32,500 GTBank", real: true },
   { ref: "OP9999999999999", label: "Fake reference", real: false },
   { ref: "FLASH00001234AB", label: "Flash Fund fake", real: false },
+];
+
+const REAL_RECEIPT_OPTIONS = [
+  { ref: "OP2026061108731", amount: 15000, sender: "Emeka Johnson", recipient: "Mama Titi Store", bank: "OPay Wallet" },
+  { ref: "OP2026061094421", amount: 45000, sender: "Adebayo Okafor", recipient: "Kunle Electronics", bank: "OPay Wallet" },
+  { ref: "GT2026061055893", amount: 32500, sender: "Ngozi Obi", recipient: "Mama Titi Store", bank: "GTBank" },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -438,7 +443,6 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
     txn?.amount &&
     Number(aiData.amount) === Number(txn.amount)
   );
-  const refExtracted = Boolean(aiData?.ref);
   const statusLooksCompleted = /completed|successful|approved|settled/i.test(String(aiData?.status || ""));
   const fieldsPresent = Boolean(aiData?.ref && aiData?.amount && aiData?.sender);
 
@@ -591,13 +595,48 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
 }
 
 // ── Attacker demo simulator ───────────────────────────────────────────────────
-function AttackerDemo({ onBack }) {
+function generateFakeRef() {
+  return `FLASH${Math.floor(Math.random() * 99999).toString().padStart(5, "0")}${Date.now().toString().slice(-4)}`;
+}
+
+function AttackerDemo({ onBack, onResult }) {
+  const [mode, setMode] = useState("fake");
   const [amount, setAmount] = useState("15000");
   const [name, setName] = useState("Emeka Johnson");
   const [recipient, setRecipient] = useState("Mama Titi Store");
+  const [realRef, setRealRef] = useState(REAL_RECEIPT_OPTIONS[0].ref);
   const [sent, setSent] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [fakeRef, setFakeRef] = useState(generateFakeRef);
+  const [receiptDate] = useState(() => new Date().toLocaleDateString("en-NG"));
 
-  const fakeRef = `FLASH${Math.floor(Math.random() * 99999).toString().padStart(5, "0")}${Date.now().toString().slice(-4)}`;
+  const realReceipt = REAL_RECEIPT_OPTIONS.find((item) => item.ref === realRef) || REAL_RECEIPT_OPTIONS[0];
+  const receipt = mode === "real"
+    ? {
+        ...realReceipt,
+        status: "completed",
+        confidence: "high",
+        is_likely_fake: false,
+        fake_signals: [],
+      }
+    : {
+        ref: fakeRef,
+        amount: Number(amount || 0),
+        sender: name,
+        recipient,
+        bank: "OPay Wallet",
+        status: "completed",
+        confidence: "low",
+        is_likely_fake: true,
+        fake_signals: ["Generated fake-alert reference is not in the trusted transactions table."],
+      };
+
+  const handleVerifyReceipt = async () => {
+    setVerifying(true);
+    const result = await verifyTransactionViaApi(receipt.ref, receipt.amount, receipt.status);
+    setVerifying(false);
+    onResult(receipt.ref, result, receipt);
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-900">
@@ -688,7 +727,10 @@ function AttackerDemo({ onBack }) {
               <ShieldCheck size={16} /> Now verify with AlertCheck →
             </button>
             <button
-              onClick={() => setSent(false)}
+              onClick={() => {
+                setFakeRef(generateFakeRef());
+                setSent(false);
+              }}
               className="w-full border border-gray-700 text-gray-400 rounded-xl py-2.5 text-sm hover:bg-gray-800"
             >
               Generate another fake

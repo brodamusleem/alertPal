@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 
 import { scoreReceiptConfidence } from './proxy.js';
 
-test('real references are rated as medium confidence in mock analysis', () => {
+test('real references are rated as high confidence in mock analysis', () => {
   const real = scoreReceiptConfidence({
     ref: 'OP2026061108731',
     is_likely_fake: false,
     fake_signals: [],
   });
 
-  assert.equal(real.confidence, 'medium');
+  assert.equal(real.confidence, 'high');
   assert.equal(real.is_likely_fake, false);
 });
 

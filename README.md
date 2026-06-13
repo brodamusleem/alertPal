@@ -1,86 +1,87 @@
-# AlertCheck — OPay Hackathon 2026
+# AlertCheck - OPay Hackathon 2026
 
-> Fake alert detector & payment verifier for Nigerian merchants
+Fake alert detector and payment verifier for Nigerian merchants.
 
-## Quick Start (3 commands)
+## Quick Start
 
 ```bash
 npm install
-# Add your Claude API key to .env
-npm run dev
+npm run dev:full
 ```
 
-Then open http://localhost:5173
+Then open http://localhost:5173.
 
----
+## Supabase Setup
 
-## Setup API Key
+Create a Supabase table named `transactions` with these fields:
 
-Create a `.env` file in the root folder:
+```sql
+create table if not exists public.transactions (
+  id uuid primary key default gen_random_uuid(),
+  ref text not null unique,
+  amount numeric not null,
+  sender text,
+  recipient text,
+  bank text,
+  status text default 'settled',
+  timestamp timestamptz default now(),
+  channel text default 'wallet_transfer',
+  created_at timestamptz default now()
+);
 
+create index if not exists transactions_ref_idx on public.transactions (ref);
 ```
-VITE_ANTHROPIC_API_KEY=your_claude_api_key_here
+
+Set these backend environment variables locally or in Vercel:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_TRANSACTIONS_TABLE=transactions
 ```
 
-Get a free API key at: https://console.anthropic.com
+The backend checks Supabase first. If Supabase is not configured or unavailable,
+it falls back to the local demo database so the app still works for pitches.
 
-> The receipt scan (AI feature) needs this key.
-> The manual reference verification works without it.
-
----
+Seed demo rows from [supabase/seed-transactions.sql](supabase/seed-transactions.sql)
+in Supabase SQL Editor so the demo references verify against your real table.
 
 ## Features
 
 | Feature | How it works |
 |---|---|
-| **Enter Ref No.** | Type/paste the txn reference → checks mock OPay DB |
-| **Scan Receipt** | Upload image → Claude AI extracts ref → verifies |
-| **Fraud Demo** | Simulates a Flash Fund fake alert for judges |
-| **History** | Tracks all checks this session |
+| Enter Ref No. | Type/paste the transaction reference, then verify against Supabase or the demo DB |
+| Scan Receipt | Upload image, extract receipt fields through the backend proxy, then verify |
+| Fraud Demo | Simulates a fake-alert receipt for judges |
+| History | Tracks all checks in the current browser session |
 
----
-
-## Demo references to use in pitch
+## Demo References
 
 | Reference | Result |
 |---|---|
-| `OP2026061108731` | ✅ VERIFIED — ₦15,000 |
-| `OP2026061094421` | ✅ VERIFIED — ₦45,000 |
-| `GT2026061055893` | ✅ VERIFIED — ₦32,500 GTBank |
-| `OP9999999999999` | ❌ FAKE |
-| `FLASH00001234AB` | ❌ FAKE |
+| `OP2026061108731` | Verified - NGN 15,000 |
+| `OP2026061094421` | Verified - NGN 45,000 |
+| `GT2026061055893` | Verified - NGN 32,500 GTBank |
+| `OP9999999999999` | Fake / not found |
+| `FLASH00001234AB` | Fake / not found |
 
----
-
-## Deploy to Vercel (free, 2 minutes)
+## Deploy to Vercel
 
 ```bash
 npm install -g vercel
 vercel
 ```
 
-Set `VITE_ANTHROPIC_API_KEY` in Vercel dashboard → Settings → Environment Variables
-
----
+Set the Supabase variables in Vercel dashboard -> Settings -> Environment
+Variables. Leave `VITE_API_BASE_URL` blank in production so frontend calls use
+same-origin `/api/...` routes.
 
 ## Tech Stack
 
-- **React 19** + **Vite 8** — frontend
-- **Tailwind CSS v4** — styling  
-- **Lucide React v1.17** — icons
-- **Claude API (claude-sonnet-4)** — AI receipt reading
-- **Mock JSON DB** — simulates OPay merchant API
-
----
-
-## Answering judge questions
-
-**"How do you get OPay's data?"**
-> The mock DB simulates OPay's merchant verification API — the same endpoint their POS terminals call. In production we integrate as a licensed merchant partner.
-
-**"What if Claude API is down?"**
-> Manual reference entry works fully offline with zero AI dependency.
-
-**"How do you make money?"**
-> ₦2,500/month per merchant (freemium) or white-label licence to OPay directly.
-
+- React 19 + Vite 8 frontend
+- Tailwind CSS v4
+- Lucide React icons
+- Supabase transaction verification
+- Express local API proxy
+- Vercel serverless API handlers
+- Mock JSON DB fallback

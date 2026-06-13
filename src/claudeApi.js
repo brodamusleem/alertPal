@@ -1,7 +1,9 @@
 // Claude Vision API — reads receipt images and extracts transaction details
-// Calls a local Node.js proxy to avoid CORS issues
+// Calls the backend proxy to avoid CORS issues
 
-const PROXY_API = "http://localhost:3001/api/extract-receipt";
+import { apiUrl } from "./apiConfig.js";
+
+const PROXY_API = apiUrl("/api/extract-receipt");
 
 export async function extractReceiptData(base64Image, mimeType = "image/jpeg") {
   try {

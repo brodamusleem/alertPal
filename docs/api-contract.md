@@ -31,5 +31,7 @@ POST /api/verify-transaction
   }
 }
 
-## Production replacement
-Replace the mock lookup with your real provider integration behind the same endpoint.
+## Data source order
+The backend checks Supabase first when `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` are set. If Supabase is not configured or the lookup
+fails, it falls back to the local mock database so demos still work offline.

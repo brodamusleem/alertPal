@@ -4,28 +4,64 @@ import { createClient } from "@supabase/supabase-js";
 
 import { verifyTransaction as verifyMockTransaction } from "../src/mockDb.js";
 
-const router = express.Router();
+export const verifyTransactionRouter = express.Router();
 
-router.use(cors());
+verifyTransactionRouter.use(cors());
 
-router.post("/api/verify-transaction", async (req, res) => {
-  const { ref, amount, status } = req.body || {};
+function setCorsHeaders(res) {
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
 
-  if (!ref) {
-    return res.status(400).json({ error: "Missing transaction reference" });
-  }
+function normalizeRef(ref) {
+  return String(ref || "").trim().toUpperCase();
+}
 
-  const normalizedRef = String(ref).trim().toUpperCase();
+let supabaseClient;
+
+function getSupabaseClient() {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return null;
+  }
+
+  if (!supabaseClient) {
+    supabaseClient = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false },
+    });
+  }
+
+  return supabaseClient;
+}
+
+function mapTransaction(row, normalizedRef) {
+  return {
+    ref: row.ref || normalizedRef,
+    amount: Number(row.amount || 0),
+    sender: row.sender || "Unknown sender",
+    recipient: row.recipient || "Unknown recipient",
+    bank: row.bank || "Bank / Wallet",
+    timestamp: row.timestamp || row.created_at || new Date().toISOString(),
+    status: row.status || "settled",
+    channel: row.channel || "supabase",
+  };
+}
+
+export async function verifyTransactionRecord({ ref, amount = null, status = null } = {}) {
+  if (!ref) {
+    return { statusCode: 400, body: { error: "Missing transaction reference" } };
+  }
+
+  const normalizedRef = normalizeRef(ref);
   const tableName = process.env.SUPABASE_TRANSACTIONS_TABLE || "transactions";
+  const supabase = getSupabaseClient();
 
-  if (supabaseUrl && supabaseKey) {
+  if (supabase) {
     try {
-      const supabase = createClient(supabaseUrl, supabaseKey, {
-        auth: { persistSession: false },
-      });
-
       const { data, error } = await supabase
         .from(tableName)
         .select("*")
@@ -35,27 +71,24 @@ router.post("/api/verify-transaction", async (req, res) => {
       if (!error && data) {
         const amountMatches = amount === null || amount === undefined || Number(amount) === Number(data.amount || 0);
         const statusLooksCompleted = status === null || status === undefined || /completed|successful|approved|settled/i.test(String(status));
+        const transaction = mapTransaction(data, normalizedRef);
 
-        return res.json({
-          found: true,
-          fraud_risk: amountMatches && statusLooksCompleted ? "none" : "medium",
-          message: "Transaction found in Supabase.",
-          checks: [
-            { label: "Reference exists", ok: true },
-            { label: "Amount matches OCR", ok: amountMatches },
-            { label: "Status looks completed", ok: statusLooksCompleted },
-          ],
-          transaction: {
-            ref: data.ref || normalizedRef,
-            amount: Number(data.amount || 0),
-            sender: data.sender || "Unknown sender",
-            recipient: data.recipient || "Unknown recipient",
-            bank: data.bank || "Bank / Wallet",
-            timestamp: data.timestamp || new Date().toISOString(),
-            status: data.status || "settled",
-            channel: data.channel || "supabase",
+        return {
+          statusCode: 200,
+          body: {
+            found: true,
+            fraud_risk: amountMatches && statusLooksCompleted ? "none" : "medium",
+            message: amountMatches
+              ? "Transaction found in Supabase and matched against the receipt data."
+              : "Transaction reference exists in Supabase, but the receipt amount does not match.",
+            checks: [
+              { label: "Reference exists", ok: true },
+              { label: "Amount matches OCR", ok: amountMatches },
+              { label: "Status looks completed", ok: statusLooksCompleted },
+            ],
+            transaction,
           },
-        });
+        };
       }
 
       if (error) {
@@ -66,7 +99,28 @@ router.post("/api/verify-transaction", async (req, res) => {
     }
   }
 
-  return res.json(verifyMockTransaction(normalizedRef, amount, status));
+  return {
+    statusCode: 200,
+    body: verifyMockTransaction(normalizedRef, amount, status),
+  };
+}
+
+verifyTransactionRouter.post("/api/verify-transaction", async (req, res) => {
+  const result = await verifyTransactionRecord(req.body || {});
+  return res.status(result.statusCode).json(result.body);
 });
 
-export default router;
+export default async function handler(req, res) {
+  setCorsHeaders(res);
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const result = await verifyTransactionRecord(req.body || {});
+  return res.status(result.statusCode).json(result.body);
+}

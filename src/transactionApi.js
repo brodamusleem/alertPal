@@ -1,6 +1,7 @@
 import { verifyTransaction as verifyMockTransaction } from "./mockDb.js";
+import { apiUrl } from "./apiConfig.js";
 
-const VERIFY_ENDPOINT = "http://localhost:3001/api/verify-transaction";
+const VERIFY_ENDPOINT = apiUrl("/api/verify-transaction");
 
 export async function verifyTransactionViaApi(ref, amount = null, status = null) {
   try {

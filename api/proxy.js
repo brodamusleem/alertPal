@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { pathToFileURL } from "node:url";
 
-import verifyTransactionRouter from "./verify-transaction.js";
+import { verifyTransactionRouter } from "./verify-transaction.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(verifyTransactionRouter);
 
 // Health check
@@ -50,7 +50,7 @@ export function scoreReceiptConfidence(extracted = {}) {
 }
 
 // Simple pattern-based text detection from image
-async function detectTextPatterns(base64Image) {
+export async function detectTextPatterns() {
   // This simulates OCR by looking for common patterns
   // In production, you'd use real OCR or AI vision here
   
@@ -60,7 +60,7 @@ async function detectTextPatterns(base64Image) {
     // Naira amount patterns
     amount: /₦\s*([\d,]+)|Amount[:\s]+([\d,]+)|NGN\s*([\d,]+)/i,
     // Date patterns
-    date: /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/,
+    date: /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/,
     // Bank names
     opay: /opay|oPay|OPAY/i,
     gtbank: /gtbank|gt bank|GT BANK/i,
@@ -70,6 +70,7 @@ async function detectTextPatterns(base64Image) {
     failed: /failed|declined|rejected/i,
     pending: /pending|processing/i,
   };
+  void patterns;
 
   // For demo purposes, return realistic extraction based on mock data
   // In production, real OCR would extract actual text from the image
@@ -113,10 +114,9 @@ async function detectTextPatterns(base64Image) {
   };
 }
 
-// Receipt extraction endpoint
-app.post("/api/extract-receipt", async (req, res) => {
+export async function handleExtractReceiptRequest(req, res) {
   try {
-    const { base64Image, mimeType = "image/jpeg" } = req.body;
+    const { base64Image } = req.body;
 
     if (!base64Image) {
       return res.status(400).json({ error: "Missing base64Image in request" });
@@ -125,7 +125,7 @@ app.post("/api/extract-receipt", async (req, res) => {
     console.log("📤 Processing receipt image...");
 
     // Detect patterns in the receipt
-    const extracted = await detectTextPatterns(base64Image);
+    const extracted = await detectTextPatterns();
 
     console.log("✅ Successfully extracted receipt data:", extracted);
     res.json(extracted);
@@ -133,9 +133,13 @@ app.post("/api/extract-receipt", async (req, res) => {
     console.error("❌ Error:", error.message);
     res.status(500).json({ error: error.message });
   }
-});
+}
+
+// Receipt extraction endpoint
+app.post("/api/extract-receipt", handleExtractReceiptRequest);
 
 export { app };
+export default app;
 
 const isDirectExecution = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
