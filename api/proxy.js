@@ -23,6 +23,9 @@ export const MOCK_RECEIPTS = {
   "OP2026061108731": { ref: "OP2026061108731", amount: 15000, sender: "Emeka Johnson", recipient: "Mama Titi Store", bank: "OPay", date: "2026-06-11", status: "completed" },
   "OP2026061094421": { ref: "OP2026061094421", amount: 45000, sender: "Adebayo Okafor", recipient: "Kunle Electronics", bank: "OPay", date: "2026-06-11", status: "completed" },
   "GT2026061055893": { ref: "GT2026061055893", amount: 32500, sender: "Ngozi Obi", recipient: "Mama Titi Store", bank: "GTBank", date: "2026-06-11", status: "completed" },
+  "ACC2026061188042": { ref: "ACC2026061188042", amount: 78000, sender: "Sarah Ibeh", recipient: "Bello Auto Parts", bank: "Access Bank", date: "2026-06-11", status: "completed" },
+  "ZEN2026061239015": { ref: "ZEN2026061239015", amount: 22000, sender: "Musa Garba", recipient: "Iya Basira Food", bank: "Zenith Bank", date: "2026-06-12", status: "completed" },
+  "UBA2026061247710": { ref: "UBA2026061247710", amount: 95500, sender: "Chioma Eze", recipient: "Kunle Electronics", bank: "UBA", date: "2026-06-12", status: "completed" },
 };
 
 export function scoreReceiptConfidence(extracted = {}) {
@@ -49,8 +52,98 @@ export function scoreReceiptConfidence(extracted = {}) {
   };
 }
 
+function extractJsonObject(text) {
+  const match = String(text || "").match(/\{[\s\S]*\}/);
+  if (!match) return null;
+
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+async function extractWithClaudeVision(base64Image, mimeType = "image/jpeg") {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey || !base64Image) {
+    return null;
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+      max_tokens: 700,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mimeType,
+                data: base64Image,
+              },
+            },
+            {
+              type: "text",
+              text: [
+                "Extract payment receipt fields from this image.",
+                "Return only JSON with keys: ref, amount, sender, recipient, bank, date, status, confidence, is_likely_fake, fake_signals.",
+                "Use null for unreadable fields. Do not invent or default any transaction field.",
+                "Flag suspicious if the image is not a payment receipt, fields are unreadable, text appears edited, or the reference format is unusual.",
+              ].join(" "),
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vision extraction failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const parsed = extractJsonObject(data?.content?.map((part) => part?.text || "").join("\n"));
+
+  if (!parsed) {
+    throw new Error("Vision extraction did not return valid JSON");
+  }
+
+  return {
+    ref: parsed.ref ? String(parsed.ref).trim().toUpperCase() : null,
+    amount: parsed.amount === null || parsed.amount === undefined ? null : Number(String(parsed.amount).replace(/[^\d.]/g, "")),
+    sender: parsed.sender || null,
+    recipient: parsed.recipient || null,
+    bank: parsed.bank || null,
+    date: parsed.date || null,
+    status: parsed.status || null,
+    confidence: parsed.confidence || "low",
+    is_likely_fake: Boolean(parsed.is_likely_fake),
+    fake_signals: Array.isArray(parsed.fake_signals) ? parsed.fake_signals : [],
+  };
+}
+
 // Simple pattern-based text detection from image
-export async function detectTextPatterns() {
+export async function detectTextPatterns({ base64Image, mimeType = "image/jpeg" } = {}) {
+  const visionResult = await extractWithClaudeVision(base64Image, mimeType);
+
+  if (visionResult) {
+    return {
+      ...visionResult,
+      ...scoreReceiptConfidence(visionResult),
+    };
+  }
+
   // This simulates OCR by looking for common patterns
   // In production, you'd use real OCR or AI vision here
   
@@ -72,32 +165,7 @@ export async function detectTextPatterns() {
   };
   void patterns;
 
-  // For demo purposes, return realistic extraction based on mock data
-  // In production, real OCR would extract actual text from the image
-  const mockRef = Object.keys(MOCK_RECEIPTS)[Math.floor(Math.random() * Object.keys(MOCK_RECEIPTS).length)];
-  const mockData = MOCK_RECEIPTS[mockRef];
-
-  if (mockData) {
-    return {
-      ref: mockData.ref,
-      amount: mockData.amount,
-      sender: mockData.sender,
-      recipient: mockData.recipient,
-      bank: mockData.bank,
-      date: mockData.date,
-      status: mockData.status,
-      ...scoreReceiptConfidence({
-        ref: mockData.ref,
-        amount: mockData.amount,
-        sender: mockData.sender,
-        recipient: mockData.recipient,
-        bank: mockData.bank,
-        status: mockData.status,
-      }),
-    };
-  }
-
-  // Fallback: return low confidence response
+  // Never invent receipt details. If OCR/vision is unavailable, the upload stays suspicious.
   return {
     ref: null,
     amount: null,
@@ -116,7 +184,7 @@ export async function detectTextPatterns() {
 
 export async function handleExtractReceiptRequest(req, res) {
   try {
-    const { base64Image } = req.body;
+    const { base64Image, mimeType } = req.body;
 
     if (!base64Image) {
       return res.status(400).json({ error: "Missing base64Image in request" });
@@ -125,7 +193,7 @@ export async function handleExtractReceiptRequest(req, res) {
     console.log("📤 Processing receipt image...");
 
     // Detect patterns in the receipt
-    const extracted = await detectTextPatterns();
+    const extracted = await detectTextPatterns({ base64Image, mimeType });
 
     console.log("✅ Successfully extracted receipt data:", extracted);
     res.json(extracted);

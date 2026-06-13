@@ -58,10 +58,39 @@ export async function verifyTransactionRecord({ ref, amount = null, status = nul
 
   const normalizedRef = normalizeRef(ref);
   const tableName = process.env.SUPABASE_TRANSACTIONS_TABLE || "transactions";
+  const fakeTableName = process.env.SUPABASE_FAKE_ALERTS_TABLE || "fake_alert_simulations";
   const supabase = getSupabaseClient();
 
   if (supabase) {
     try {
+      const { data: fakeData, error: fakeError } = await supabase
+        .from(fakeTableName)
+        .select("*")
+        .eq("ref", normalizedRef)
+        .maybeSingle();
+
+      if (!fakeError && fakeData) {
+        return {
+          statusCode: 200,
+          body: {
+            found: false,
+            fake_found: true,
+            fraud_risk: "high",
+            simulated_fake: mapTransaction(fakeData, normalizedRef),
+            message: "Reference found in the fake-alert database. Do not release goods.",
+            checks: [
+              { label: "Reference found in fake alerts", ok: true },
+              { label: "Reference exists in real transactions", ok: false },
+              { label: "Payment can be trusted", ok: false },
+            ],
+          },
+        };
+      }
+
+      if (fakeError) {
+        console.warn("Supabase fake-alert lookup failed, checking real transactions:", fakeError.message);
+      }
+
       const { data, error } = await supabase
         .from(tableName)
         .select("*")
@@ -77,13 +106,14 @@ export async function verifyTransactionRecord({ ref, amount = null, status = nul
           statusCode: 200,
           body: {
             found: true,
+            fake_found: false,
             fraud_risk: amountMatches && statusLooksCompleted ? "none" : "medium",
             message: amountMatches
-              ? "Transaction found in Supabase and matched against the receipt data."
-              : "Transaction reference exists in Supabase, but the receipt amount does not match.",
+              ? "Real transaction found in Supabase and matched against the receipt data."
+              : "Real transaction reference exists in Supabase, but the receipt amount does not match.",
             checks: [
-              { label: "Reference exists", ok: true },
-              { label: "Amount matches OCR", ok: amountMatches },
+              { label: "Reference exists in real transactions", ok: true },
+              { label: "Amount matches real record", ok: amountMatches },
               { label: "Status looks completed", ok: statusLooksCompleted },
             ],
             transaction,

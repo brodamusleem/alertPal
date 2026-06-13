@@ -27,14 +27,22 @@ const DEMO_REFS = [
   { ref: "OP2026061108731", label: "Real — ₦15,000", real: true },
   { ref: "OP2026061094421", label: "Real — ₦45,000", real: true },
   { ref: "GT2026061055893", label: "Real — ₦32,500 GTBank", real: true },
+  { ref: "ACC2026061188042", label: "Real - NGN 78,000 Access", real: true },
+  { ref: "ZEN2026061239015", label: "Real - NGN 22,000 Zenith", real: true },
+  { ref: "UBA2026061247710", label: "Real - NGN 95,500 UBA", real: true },
   { ref: "OP9999999999999", label: "Fake reference", real: false },
   { ref: "FLASH00001234AB", label: "Flash Fund fake", real: false },
+  { ref: "FAKE2026061255100", label: "Fake bank receipt", real: false },
+  { ref: "ZEN999888777666", label: "Fake Zenith-style", real: false },
 ];
 
 const REAL_RECEIPT_OPTIONS = [
   { ref: "OP2026061108731", amount: 15000, sender: "Emeka Johnson", recipient: "Mama Titi Store", bank: "OPay Wallet" },
   { ref: "OP2026061094421", amount: 45000, sender: "Adebayo Okafor", recipient: "Kunle Electronics", bank: "OPay Wallet" },
   { ref: "GT2026061055893", amount: 32500, sender: "Ngozi Obi", recipient: "Mama Titi Store", bank: "GTBank" },
+  { ref: "ACC2026061188042", amount: 78000, sender: "Sarah Ibeh", recipient: "Bello Auto Parts", bank: "Access Bank" },
+  { ref: "ZEN2026061239015", amount: 22000, sender: "Musa Garba", recipient: "Iya Basira Food", bank: "Zenith Bank" },
+  { ref: "UBA2026061247710", amount: 95500, sender: "Chioma Eze", recipient: "Kunle Electronics", bank: "UBA" },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -395,6 +403,22 @@ function ScanScreen({ onResult, onBack }) {
             {!extracted.ref ? (
               <div className="space-y-2">
                 <p className="text-xs text-red-600 text-center">Could not extract a reference number. Try entering it manually.</p>
+                <button
+                  onClick={() => onResult("UNREADABLE_RECEIPT", {
+                    found: false,
+                    fake_found: false,
+                    fraud_risk: "high",
+                    message: "Receipt fields could not be extracted, so no real transaction can be confirmed.",
+                    checks: [
+                      { label: "Reference extracted", ok: false },
+                      { label: "Reference found in fake alerts", ok: false },
+                      { label: "Reference exists in real transactions", ok: false },
+                    ],
+                  }, extracted)}
+                  className="w-full bg-red-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-red-700"
+                >
+                  Flag as suspicious
+                </button>
                 <button onClick={onBack} className="w-full border border-gray-200 rounded-xl py-3 text-sm font-medium text-gray-600 hover:bg-gray-50">
                   Enter manually instead
                 </button>
@@ -434,11 +458,13 @@ function ScanScreen({ onResult, onBack }) {
 // ── Result screen ─────────────────────────────────────────────────────────────
 function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
   const [copied, setCopied] = useState(false);
-  const real = result?.found;
+  const found = Boolean(result?.found);
+  const fakeFound = Boolean(result?.fake_found);
+  const real = found && result?.fraud_risk !== "medium";
   const txn = result?.transaction;
 
   const amountMatch = Boolean(
-    real &&
+    found &&
     aiData?.amount &&
     txn?.amount &&
     Number(aiData.amount) === Number(txn.amount)
@@ -447,7 +473,7 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
   const fieldsPresent = Boolean(aiData?.ref && aiData?.amount && aiData?.sender);
 
   const decisionChecks = [
-    { label: "Reference matched in DB", ok: real },
+    { label: "Reference matched in DB", ok: found },
     { label: "Amount matches OCR readout", ok: amountMatch },
     { label: "Receipt status looks completed", ok: statusLooksCompleted },
     { label: "OCR extracted key fields", ok: fieldsPresent },
@@ -461,7 +487,7 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
-      <TopBar title={real ? "Payment Verified" : "Alert: Possible Fake"} showBack onBack={onBack} />
+      <TopBar title={real ? "Payment Verified" : fakeFound ? "Fake Alert Found" : "Alert: Possible Fake"} showBack onBack={onBack} />
       <div className="flex-1 px-4 py-5 space-y-4 max-w-lg mx-auto w-full">
 
         {/* Big result card */}
@@ -472,12 +498,16 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
               : <XCircle size={44} className="text-white" />}
           </div>
           <h2 className="text-2xl font-bold text-white mb-1">
-            {real ? "VERIFIED" : "NOT FOUND"}
+            {real ? "VERIFIED" : fakeFound ? "FAKE ALERT" : found ? "MISMATCH" : "NOT FOUND"}
           </h2>
           <p className="text-white/80 text-sm leading-relaxed">
             {real
-              ? "This transaction exists in OPay's database. Safe to release goods."
-              : "This reference was not found in OPay's database. Do not release goods."}
+              ? "This receipt matches a real transaction in the trusted database. Safe to release goods."
+              : fakeFound
+                ? "This reference exists in the fake-alert database. Do not release goods."
+                : found
+                ? "The reference exists, but the receipt details do not match the real transaction. Do not release goods yet."
+                : "This reference was not found in either database. Treat it as fake until proven otherwise."}
           </p>
           {real && txn && (
             <div className="mt-4 bg-white/10 rounded-xl px-4 py-2">
@@ -488,7 +518,7 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
         </div>
 
         {/* Transaction details */}
-        {real && txn && (
+        {found && txn && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-3 border-b border-gray-50">
               Transaction details
@@ -525,7 +555,11 @@ function ResultScreen({ ref, result, aiData, onBack, onAnother, onReport }) {
               <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">Fraud risk: HIGH</p>
             </div>
             <p className="text-xs text-red-600 leading-relaxed">
-              Reference <span className="font-mono font-semibold">{ref}</span> does not exist in OPay's transaction database. This is consistent with a Flash Fund or bulk-SMS fake alert attack.
+              {fakeFound
+                ? "This receipt matched a known fake-alert simulation record."
+                : found
+                ? "The reference exists, but one or more receipt fields do not match the stored transaction."
+                : <>Reference <span className="font-mono font-semibold">{ref}</span> was not found in the fake database or the real transaction database. This is suspicious and should be treated as fake.</>}
             </p>
             {aiData?.fake_signals?.length > 0 && (
               <div className="mt-2 space-y-1">
@@ -599,6 +633,52 @@ function generateFakeRef() {
   return `FLASH${Math.floor(Math.random() * 99999).toString().padStart(5, "0")}${Date.now().toString().slice(-4)}`;
 }
 
+function ReceiptPreview({ receipt, variant = "real", receiptDate }) {
+  const isReal = variant === "real";
+  const rows = [
+    ["Merchant", receipt.recipient],
+    ["Sender", receipt.sender],
+    ["Provider", receipt.bank],
+    ["Date", receiptDate],
+    ["Reference", receipt.ref],
+    ["Status", receipt.status],
+  ];
+
+  return (
+    <div className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100 text-gray-900">
+      <div className="flex items-start justify-between border-b border-gray-100 pb-4">
+        <div>
+          <p className="text-[10px] font-semibold tracking-[0.18em] text-gray-400 uppercase">Payment Receipt</p>
+          <h3 className="text-lg font-bold mt-1">Transfer {isReal ? "Verified" : "Successful"}</h3>
+        </div>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isReal ? "bg-green-100" : "bg-amber-100"}`}>
+          {isReal ? <CheckCircle2 size={20} className="text-green-600" /> : <Smartphone size={20} className="text-amber-600" />}
+        </div>
+      </div>
+
+      <div className="py-5 text-center border-b border-dashed border-gray-200">
+        <p className="text-xs text-gray-400">Amount paid</p>
+        <p className="text-3xl font-bold mt-1">{fmt(receipt.amount)}</p>
+      </div>
+
+      <div className="space-y-3 pt-4">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-3 text-xs">
+            <span className="text-gray-400">{label}</span>
+            <span className={`font-semibold text-right ${label === "Reference" ? "font-mono break-all" : ""} ${label === "Status" ? "text-green-600 capitalize" : "text-gray-800"}`}>
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className={`mt-5 rounded-xl px-3 py-2 text-center text-xs font-semibold ${isReal ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+        {isReal ? "Stored in real transactions database" : "Looks valid on screen, but must be verified"}
+      </div>
+    </div>
+  );
+}
+
 function AttackerDemo({ onBack, onResult }) {
   const [mode, setMode] = useState("fake");
   const [amount, setAmount] = useState("15000");
@@ -664,8 +744,38 @@ function AttackerDemo({ onBack, onResult }) {
 
         {!sent ? (
           <div className="bg-gray-800 rounded-2xl p-4 space-y-3 border border-gray-700">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Flash Fund — Fake Alert Generator</p>
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2 bg-gray-900 rounded-xl p-1">
+              {[
+                ["fake", "Fake alert"],
+                ["real", "Real alert"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setMode(value)}
+                  className={`rounded-lg py-2 text-xs font-semibold transition-colors ${mode === value ? "bg-white text-gray-900" : "text-gray-400 hover:text-white"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {mode === "real" && (
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Real transaction from database</label>
+                <select
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-green-500"
+                  value={realRef}
+                  onChange={e => setRealRef(e.target.value)}
+                >
+                  {REAL_RECEIPT_OPTIONS.map((item) => (
+                    <option key={item.ref} value={item.ref}>
+                      {item.ref} - {fmt(item.amount)} - {item.bank}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{mode === "real" ? "Trusted receipt preview" : "Fake alert generator"}</p>
+            <div className={`space-y-2 ${mode === "real" ? "hidden" : ""}`}>
               {[
                 { label: "Amount (₦)", value: amount, set: setAmount, ph: "15000" },
                 { label: "Sender name", value: name, set: setName, ph: "Emeka Johnson" },
@@ -682,15 +792,16 @@ function AttackerDemo({ onBack, onResult }) {
             </div>
             <button
               onClick={() => setSent(true)}
-              className="w-full bg-red-700 text-white rounded-xl py-3 font-semibold text-sm hover:bg-red-600 transition-all"
+              className={`w-full text-white rounded-xl py-3 font-semibold text-sm transition-all ${mode === "real" ? "bg-green-700 hover:bg-green-600" : "bg-red-700 hover:bg-red-600"}`}
             >
-              Send Fake Alert →
+              Show {mode === "real" ? "Real" : "Fake"} Receipt
             </button>
           </div>
         ) : (
           <div className="space-y-3">
+            <ReceiptPreview receipt={receipt} variant={mode} receiptDate={receiptDate} />
             {/* Fake receipt */}
-            <div className="bg-white rounded-2xl p-5 shadow-lg">
+            <div className="hidden">
               <div className="flex items-center gap-2 mb-4 justify-center">
                 <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
                   <CheckCircle2 size={16} className="text-white" />
@@ -715,16 +826,26 @@ function AttackerDemo({ onBack, onResult }) {
               </div>
             </div>
 
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-3 text-center">
-              <p className="text-xs text-gray-400">👆 This receipt looks 100% real — but the money was <span className="text-red-400 font-semibold">NEVER sent.</span></p>
-              <p className="text-xs text-gray-500 mt-1">Reference <span className="font-mono text-red-400">{fakeRef}</span> does not exist in OPay's servers.</p>
+            <div className={`${mode === "real" ? "bg-green-950/40 border-green-800" : "bg-gray-800 border-gray-700"} border rounded-xl p-3 text-center`}>
+              {mode === "real" ? (
+                <>
+                  <p className="text-xs text-green-300">This receipt uses a reference that exists in the real transactions database.</p>
+                  <p className="text-xs text-gray-500 mt-1">AlertCheck should verify it and show the stored settlement details.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-400">This receipt looks complete, but the money was <span className="text-red-400 font-semibold">never settled.</span></p>
+                  <p className="text-xs text-gray-500 mt-1">Reference <span className="font-mono text-red-400">{fakeRef}</span> is not in the real transactions database.</p>
+                </>
+              )}
             </div>
 
             <button
-              onClick={onBack}
-              className="w-full bg-blue-600 text-white rounded-xl py-3 font-semibold text-sm hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+              onClick={handleVerifyReceipt}
+              disabled={verifying}
+              className="w-full bg-blue-600 text-white rounded-xl py-3 font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
             >
-              <ShieldCheck size={16} /> Now verify with AlertCheck →
+              {verifying ? <><RefreshCw size={16} className="animate-spin" /> Verifying receipt...</> : <><ShieldCheck size={16} /> Verify Payment</>}
             </button>
             <button
               onClick={() => {
@@ -787,7 +908,7 @@ export default function App() {
         />
       )}
       {screen === "attacker" && (
-        <AttackerDemo onBack={() => setScreen("home")} />
+        <AttackerDemo onBack={() => setScreen("home")} onResult={handleResult} />
       )}
     </div>
   );
